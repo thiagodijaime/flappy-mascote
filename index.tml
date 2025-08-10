@@ -1,0 +1,537 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>Flappy Mascote — Jogo Web</title>
+  <style>
+    :root {
+      --bg: #0f1222;
+      --text: #ffffff;
+      --muted: #9aa3b2;
+    }
+    html, body { height:100%; margin:0; }
+    body { background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; overflow:hidden; }
+    #wrap { position:relative; width:100vw; height:100vh; display:grid; place-items:center; }
+    canvas { width:100vw; height:100vh; display:block; background: linear-gradient(#58aef3, #bfe7ff); }
+    /* HUD / overlays */
+    .overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; padding:24px; text-align:center; pointer-events:none; }
+    .panel { background:rgba(15,18,34,0.8); backdrop-filter: blur(8px); border:1px solid rgba(255,255,255,0.08); border-radius:20px; padding:20px 18px; max-width:420px; box-shadow: 0 10px 30px rgba(0,0,0,.35); pointer-events:auto; }
+    h1 { font-size: clamp(22px, 4vw, 32px); margin:0 0 6px; letter-spacing:.2px; }
+    p { margin:0; color:#d8deea; }
+    .btn { appearance:none; border:0; border-radius:16px; padding:14px 18px; font-weight:700; cursor:pointer; transition:.2s transform, .2s opacity; }
+    .btn:hover { transform: translateY(-1px); }
+    .btn:active { transform: translateY(1px); }
+    .btn-primary { background: var(--brand, #6c5ce7); color:white; }
+    .btn-ghost { background: rgba(255,255,255,.08); color:white; }
+
+    /* Top bar brand badge */
+    #brandBadge { position:absolute; top:12px; left:12px; display:flex; align-items:center; gap:10px; padding:10px 12px; background: rgba(15,18,34,.65); border:1px solid rgba(255,255,255,.08); border-radius:14px; backdrop-filter: blur(6px); }
+    #brandBadge img { width:28px; height:28px; object-fit:contain; border-radius:6px; background: rgba(255,255,255,.1); }
+    #brandBadge .name { font-weight:700; font-size:14px; letter-spacing:.2px; }
+
+    /* Score chip */
+    #scoreChip { position:absolute; top:12px; right:12px; background: rgba(15,18,34,.65); border:1px solid rgba(255,255,255,.08); border-radius:14px; padding:8px 12px; display:flex; gap:10px; align-items:center; backdrop-filter: blur(6px); }
+    #scoreChip .s { font-weight:800; }
+    #scoreChip small { color:#c3ccda; }
+
+    /* Bottom CTA */
+    #ctaBar { position:absolute; bottom:12px; left:12px; right:12px; display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }
+
+    /* Utility */
+    .hide { display:none; }
+    .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0; }
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <canvas id="game" aria-label="Flappy Mascote"></canvas>
+
+    <!-- Brand badge / score -->
+    <div id="brandBadge" role="group" aria-label="Marca">
+      <img id="brandLogo" alt="Logo" />
+      <div class="name" id="brandName">Sua Marca</div>
+    </div>
+    <div id="scoreChip" aria-live="polite">
+      <div><small>Score</small> <span class="s" id="score">0</span></div>
+      <div><small>Recorde</small> <span class="s" id="best">0</span></div>
+    </div>
+
+    <!-- Start Overlay -->
+    <div id="startOverlay" class="overlay">
+      <div class="panel">
+        <h1>Flappy Mascote</h1>
+        <p>Toque na tela ou pressione <b>Barra de Espaço</b> para voar. Não encoste nos canos!</p>
+        <div style="height:10px"></div>
+        <button class="btn btn-primary" id="btnStart">Começar</button>
+        <div style="height:8px"></div>
+        <button class="btn btn-ghost" id="btnHow">Como jogar</button>
+      </div>
+    </div>
+
+    <!-- How Overlay -->
+    <div id="howOverlay" class="overlay hide">
+      <div class="panel">
+        <h1>Como jogar</h1>
+        <p>Toque ou pressione a <b>Barra de Espaço</b> para dar impulso no mascote. Passe entre os canos para marcar pontos. O jogo acelera com sua pontuação.</p>
+        <div style="height:10px"></div>
+        <button class="btn btn-primary" id="btnHowBack">Entendi</button>
+      </div>
+    </div>
+
+    <!-- Game Over Overlay -->
+    <div id="overOverlay" class="overlay hide">
+      <div class="panel">
+        <h1>Fim de jogo</h1>
+        <p style="margin-bottom:10px">Score: <b id="finalScore">0</b> • Recorde: <b id="finalBest">0</b></p>
+        <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+          <button class="btn btn-primary" id="btnRetry">Jogar de novo</button>
+          <a class="btn btn-ghost" id="btnShare" target="_blank" rel="noopener">Compartilhar</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- CTA Bar -->
+    <div id="ctaBar" class="hide">
+      <a id="ctaBtn" class="btn btn-primary" href="#" target="_blank" rel="noopener">Fale com a gente no WhatsApp</a>
+    </div>
+  </div>
+
+<script>
+/* ==========================================================
+   FLAPPY MASCOTE — Single-file, brandable
+   ----------------------------------------------------------
+   Como customizar rapidamente:
+   1) Edite CONFIG abaixo (cores, nome, logo, WhatsApp, etc.)
+   2) Para usar uma imagem do mascote, coloque `useImage:true`
+      e aponte `imageUrl` para um PNG com fundo transparente.
+   3) Publique o arquivo como está em qualquer host estático.
+   ---------------------------------------------------------- */
+const CONFIG = {
+  brand: {
+    name: 'Sua Marca',
+    primary: '#6c5ce7',
+    secondary: '#ffd166',
+    logoUrl: null, // Ex.: 'https://.../logo.png' (ou deixe null para ícone genérico)
+  },
+  mascot: {
+    useImage: false,
+    imageUrl: '', // Ex.: 'https://.../mascote.png'
+    color: '#ff4757',
+    stroke: '#1e1e1e',
+  },
+  game: {
+    baseSpeed: 110, // px/s
+    gravity: 1400,  // px/s^2
+    jump: 360,      // impulso px/s
+    gap: 160,       // abertura inicial dos canos
+    pipeSpacing: 260, // distância entre pares de canos
+    pipeWidth: 64,
+    difficultyRamp: 0.98, // a cada ponto, gap *= ramp (>= 0.9 recomendado)
+    speedRamp: 1.015,     // a cada ponto, speed *= ramp
+    floorHeight: 88,
+  },
+  rewards: {
+    enableCTA: true,
+    minScoreForCTA: 8,
+    ctaText: 'Fale com a gente no WhatsApp',
+    ctaUrl: 'https://wa.me/5533999999999?text=Quero%20meu%20cupom%20do%20jogo',
+  }
+};
+
+// ---- Apply brand variables to CSS badge/colors
+const root = document.documentElement;
+root.style.setProperty('--brand', CONFIG.brand.primary);
+
+// Minimal placeholder logo if none provided
+const placeholderLogo = (
+  'data:image/svg+xml;utf8,' +
+  encodeURIComponent(`<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="${CONFIG.brand.primary}"/><stop offset="1" stop-color="${CONFIG.brand.secondary}"/></linearGradient></defs><rect rx="24" ry="24" width="128" height="128" fill="url(#g)"/><path d="M36 68c10 8 22 12 36 12 8 0 16-2 24-6l-6 22H38L36 68z" fill="rgba(255,255,255,0.7)"/><circle cx="46" cy="46" r="14" fill="white"/><circle cx="78" cy="40" r="10" fill="white"/></svg>`) );
+
+const brandLogoImg = document.getElementById('brandLogo');
+brandLogoImg.src = CONFIG.brand.logoUrl || placeholderLogo;
+document.getElementById('brandName').textContent = CONFIG.brand.name || 'Sua Marca';
+
+// CTA setup
+const ctaBar = document.getElementById('ctaBar');
+const ctaBtn = document.getElementById('ctaBtn');
+ctaBtn.textContent = CONFIG.rewards.ctaText;
+ctaBtn.href = CONFIG.rewards.ctaUrl;
+
+// UI elements
+const scoreSpan = document.getElementById('score');
+const bestSpan = document.getElementById('best');
+const finalScoreSpan = document.getElementById('finalScore');
+const finalBestSpan = document.getElementById('finalBest');
+
+const startOverlay = document.getElementById('startOverlay');
+const howOverlay = document.getElementById('howOverlay');
+const overOverlay = document.getElementById('overOverlay');
+
+const btnStart = document.getElementById('btnStart');
+const btnHow = document.getElementById('btnHow');
+const btnHowBack = document.getElementById('btnHowBack');
+const btnRetry = document.getElementById('btnRetry');
+const btnShare = document.getElementById('btnShare');
+
+// Share (WhatsApp) composer
+function updateShare(score) {
+  const text = encodeURIComponent(`Acertei ${score} pontos no Flappy Mascote da ${CONFIG.brand.name}! Consegue bater?`);
+  const url = encodeURIComponent(location.href);
+  btnShare.href = `https://wa.me/?text=${text}%20${url}`;
+}
+
+// Local storage for best score
+const LS_KEY = 'flappy_mascote_best_v1';
+let best = Number(localStorage.getItem(LS_KEY) || 0);
+bestSpan.textContent = best;
+
+// Canvas and resolution handling (design 360x640)
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const DPR = Math.max(1, Math.floor(window.devicePixelRatio || 1));
+let W = 360, H = 640; // logical units
+
+function resize() {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  // Keep aspect by fitting height
+  const aspect = 360/640;
+  let cw = vw, ch = vh;
+  // We'll just fill screen but use logical W/H for math
+  canvas.width = vw * DPR;
+  canvas.height = vh * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  W = vw; H = vh;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// Game state
+const STATE = { READY:0, PLAYING:1, OVER:2 };
+let state = STATE.READY;
+
+// Entities
+let bird, pipes, particles;
+let score = 0;
+let speed = CONFIG.game.baseSpeed;
+let gap = CONFIG.game.gap;
+let spawnTimer = 0;
+
+// Mascot sprite (optional)
+let mascotImg = null; let mascotLoaded = false;
+if (CONFIG.mascot.useImage && CONFIG.mascot.imageUrl) {
+  mascotImg = new Image();
+  mascotImg.onload = () => mascotLoaded = true;
+  mascotImg.crossOrigin = 'anonymous';
+  mascotImg.src = CONFIG.mascot.imageUrl;
+}
+
+function reset() {
+  score = 0;
+  speed = CONFIG.game.baseSpeed;
+  gap = CONFIG.game.gap;
+  spawnTimer = 0;
+  bird = {
+    x: Math.max(60, W*0.25),
+    y: H*0.5,
+    r: Math.max(12, Math.min(20, Math.round(Math.min(W,H)/32))),
+    vy: 0,
+    rot: 0,
+  };
+  pipes = [];
+  particles = [];
+}
+reset();
+
+function flap() {
+  if (state === STATE.READY) {
+    state = STATE.PLAYING;
+  }
+  if (state === STATE.PLAYING) {
+    bird.vy = -CONFIG.game.jump;
+  }
+}
+
+// Inputs
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Space' || e.code === 'ArrowUp') { e.preventDefault(); flap(); }
+  if (e.code === 'KeyP') { paused = !paused; }
+  if (state === STATE.OVER && (e.code === 'Space' || e.code === 'Enter')) { restart(); }
+});
+window.addEventListener('pointerdown', () => {
+  if (state === STATE.OVER) return;
+  flap();
+});
+
+btnStart.addEventListener('click', () => { startOverlay.classList.add('hide'); flap(); });
+btnHow.addEventListener('click', () => { startOverlay.classList.add('hide'); howOverlay.classList.remove('hide'); });
+btnHowBack.addEventListener('click', () => { howOverlay.classList.add('hide'); startOverlay.classList.remove('hide'); });
+btnRetry.addEventListener('click', () => restart());
+
+function restart() {
+  overOverlay.classList.add('hide');
+  ctaBar.classList.add('hide');
+  reset();
+  state = STATE.READY;
+  startOverlay.classList.remove('hide');
+}
+
+// Helper random
+const rand = (a,b)=> a + Math.random()*(b-a);
+
+// Pipes spawn
+function spawnPipe() {
+  const marginTop = 40;
+  const marginBottom = CONFIG.game.floorHeight + 20;
+  const center = rand(marginTop+gap/2, H - marginBottom - gap/2);
+  const topH = center - gap/2;
+  const bottomY = center + gap/2;
+  pipes.push({ x: W + CONFIG.game.pipeWidth, y:0, w:CONFIG.game.pipeWidth, h:topH, passed:false });
+  pipes.push({ x: W + CONFIG.game.pipeWidth, y: bottomY, w:CONFIG.game.pipeWidth, h: H - bottomY - CONFIG.game.floorHeight });
+}
+
+// Collision check (circle-rect)
+function circleRectCollide(cx, cy, r, rx, ry, rw, rh) {
+  const closestX = Math.max(rx, Math.min(cx, rx + rw));
+  const closestY = Math.max(ry, Math.min(cy, ry + rh));
+  const dx = cx - closestX;
+  const dy = cy - closestY;
+  return (dx*dx + dy*dy) <= r*r;
+}
+
+// Particles for flair
+function spawnBurst(x,y,color) {
+  for (let i=0;i<12;i++) {
+    particles.push({ x, y, vx: rand(-120,120), vy: rand(-220, -60), g: 680, life: rand(0.4,0.9), age:0, color });
+  }
+}
+
+let lastTime = 0, paused = false;
+function loop(t) {
+  requestAnimationFrame(loop);
+  if (!lastTime) { lastTime = t; return; }
+  let dt = Math.min(0.032, (t - lastTime)/1000); // clamp 32ms
+  lastTime = t;
+  if (paused) return;
+
+  // Clear
+  ctx.clearRect(0,0,W,H);
+
+  // Background sky gradient already via CSS; add parallax clouds/hills
+  drawParallax(dt);
+
+  // State draws
+  if (state !== STATE.OVER) updateGame(dt);
+  drawGame();
+}
+requestAnimationFrame(loop);
+
+let cloudOffset = 0, hillOffset = 0;
+function drawParallax(dt) {
+  // Hills
+  hillOffset += dt * (speed*0.2);
+  const hillH = Math.max(60, H*0.18);
+  ctx.fillStyle = shade(CONFIG.brand.primary, -0.35);
+  for (let x = -((hillOffset)%W); x < W+200; x += 200) {
+    ctx.beginPath();
+    ctx.ellipse(x, H - CONFIG.game.floorHeight, 200, hillH, 0, 0, Math.PI, true);
+    ctx.fill();
+  }
+  // Clouds
+  cloudOffset += dt * (speed*0.1);
+  ctx.globalAlpha = 0.7;
+  ctx.fillStyle = 'rgba(255,255,255,0.9)';
+  for (let x = -((cloudOffset)%160); x < W+160; x += 160) {
+    drawCloud(x, 80);
+    drawCloud(x+60, 140);
+  }
+  ctx.globalAlpha = 1;
+
+  // Floor
+  ctx.fillStyle = shade(CONFIG.brand.primary, -0.25);
+  ctx.fillRect(0, H - CONFIG.game.floorHeight, W, CONFIG.game.floorHeight);
+  ctx.fillStyle = shade(CONFIG.brand.primary, -0.45);
+  for (let x=0; x<W; x+=32) ctx.fillRect(x, H - CONFIG.game.floorHeight, 16, 4);
+}
+
+function drawCloud(x, y) {
+  ctx.beginPath(); ctx.arc(x, y, 18, 0, Math.PI*2);
+  ctx.arc(x+16, y+4, 16, 0, Math.PI*2);
+  ctx.arc(x-16, y+8, 14, 0, Math.PI*2);
+  ctx.fill();
+}
+
+function updateGame(dt) {
+  // Bird physics
+  bird.vy += CONFIG.game.gravity * dt;
+  bird.y += bird.vy * dt;
+  bird.rot = Math.atan2(bird.vy, 220);
+
+  // Keep in bounds
+  if (bird.y - bird.r < 0) { bird.y = bird.r; bird.vy = 0; }
+
+  // Spawn pipes
+  spawnTimer -= dt;
+  if (spawnTimer <= 0) {
+    spawnPipe();
+    spawnTimer = CONFIG.game.pipeSpacing / speed; // time until next based on speed
+  }
+
+  // Move pipes & check pass/collisions
+  for (let i=pipes.length-1; i>=0; i--) {
+    const p = pipes[i];
+    p.x -= speed * dt;
+    // score when top pipe passes center (use one pipe of the pair)
+    if (!p.passed && p.y === 0 && p.x + p.w < bird.x) {
+      p.passed = true;
+      score++;
+      scoreSpan.textContent = score;
+      // ramp difficulty
+      gap = Math.max(110, gap * CONFIG.game.difficultyRamp);
+      speed *= CONFIG.game.speedRamp;
+      spawnBurst(bird.x, bird.y, CONFIG.brand.secondary);
+    }
+    // remove offscreen
+    if (p.x + p.w < -8) pipes.splice(i,1);
+
+    // collisions (only while playing)
+    if (state === STATE.PLAYING) {
+      if (circleRectCollide(bird.x, bird.y, bird.r, p.x, p.y, p.w, p.h)) {
+        gameOver();
+        return;
+      }
+    }
+  }
+
+  // Ground collision
+  if (bird.y + bird.r >= H - CONFIG.game.floorHeight) {
+    bird.y = H - CONFIG.game.floorHeight - bird.r;
+    gameOver();
+    return;
+  }
+
+  // Particles
+  for (let i=particles.length-1;i>=0;i--) {
+    const pt = particles[i];
+    pt.age += dt; if (pt.age>pt.life) { particles.splice(i,1); continue; }
+    pt.vy += pt.g*dt; pt.x += pt.vx*dt; pt.y += pt.vy*dt;
+  }
+}
+
+function drawGame() {
+  // Pipes
+  for (let i=0;i<pipes.length;i++) {
+    const p = pipes[i];
+    drawPipe(p);
+  }
+
+  // Bird
+  drawBird();
+
+  // Particles
+  for (let i=0;i<particles.length;i++) {
+    const pt = particles[i];
+    const k = 1 - pt.age/pt.life;
+    ctx.globalAlpha = Math.max(0, k);
+    ctx.fillStyle = pt.color;
+    ctx.beginPath();
+    ctx.arc(pt.x, pt.y, 3 + 3*k, 0, Math.PI*2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawPipe(p) {
+  const radius = 10;
+  ctx.fillStyle = shade(CONFIG.brand.primary, -0.1);
+  roundRect(ctx, p.x, p.y, p.w, p.h, radius);
+  ctx.fill();
+  // cap
+  ctx.fillStyle = shade(CONFIG.brand.primary, 0.05);
+  ctx.fillRect(p.x-2, p.y + (p.y===0? p.h-14 : -4), p.w+4, 14);
+  // stripes
+  ctx.fillStyle = CONFIG.brand.secondary;
+  for (let y=p.y+ (p.y===0? 12:6); y<p.y+p.h-6; y+=24) {
+    ctx.fillRect(p.x+6, y, p.w-12, 4);
+  }
+}
+
+function drawBird() {
+  ctx.save();
+  ctx.translate(bird.x, bird.y);
+  ctx.rotate(bird.rot*0.6);
+
+  if (mascotLoaded) {
+    const sz = bird.r*2.1;
+    ctx.drawImage(mascotImg, -sz/2, -sz/2, sz, sz);
+  } else {
+    // Simple mascot: round body with wing/eye using brand palette
+    ctx.fillStyle = CONFIG.mascot.color;
+    ctx.strokeStyle = CONFIG.mascot.stroke;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0,0,bird.r,0,Math.PI*2); ctx.fill(); ctx.stroke();
+    // beak
+    ctx.fillStyle = CONFIG.brand.secondary;
+    ctx.beginPath(); ctx.moveTo(bird.r-6,0); ctx.lineTo(bird.r+8,4); ctx.lineTo(bird.r-6,8); ctx.closePath(); ctx.fill();
+    // wing
+    ctx.fillStyle = shade(CONFIG.mascot.color,-0.15);
+    ctx.beginPath(); ctx.arc(-6,4,bird.r*0.55, Math.PI*0.2, Math.PI*1.7); ctx.fill();
+    // eye
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(4,-4, bird.r*0.28, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(6,-4, bird.r*0.12, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function gameOver() {
+  if (state === STATE.OVER) return;
+  state = STATE.OVER;
+  spawnBurst(bird.x, bird.y, '#fff');
+
+  // update best
+  if (score > best) { best = score; localStorage.setItem(LS_KEY, String(best)); }
+  bestSpan.textContent = best;
+  finalScoreSpan.textContent = score;
+  finalBestSpan.textContent = best;
+  updateShare(score);
+
+  overOverlay.classList.remove('hide');
+
+  // Reward/CTA logic
+  if (CONFIG.rewards.enableCTA && score >= CONFIG.rewards.minScoreForCTA) {
+    ctaBar.classList.remove('hide');
+  }
+}
+
+// Tiny helpers
+function roundRect(ctx, x, y, w, h, r) {
+  if (w<2*r) r=w/2; if (h<2*r) r=h/2;
+  ctx.beginPath();
+  ctx.moveTo(x+r, y);
+  ctx.arcTo(x+w, y, x+w, y+h, r);
+  ctx.arcTo(x+w, y+h, x, y+h, r);
+  ctx.arcTo(x, y+h, x, y, r);
+  ctx.arcTo(x, y, x+w, y, r);
+  ctx.closePath();
+}
+function shade(hex, lum) {
+  // simple color shade utility
+  hex = String(hex).replace(/[^0-9a-f]/gi, '');
+  if (hex.length < 6) hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+  let rgb = "#", c, i;
+  for (i=0; i<3; i++) {
+    c = parseInt(hex.substr(i*2,2),16);
+    c = Math.round(Math.min(Math.max(0, c + (c*lum)), 255)).toString(16);
+    rgb += ("00"+c).substr(c.length);
+  }
+  return rgb;
+}
+
+// Start in READY state with overlay visible
+startOverlay.classList.remove('hide');
+
+</script>
+</body>
+</html>
